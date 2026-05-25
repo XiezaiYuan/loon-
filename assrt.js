@@ -9,7 +9,7 @@ var WidgetMetadata = {
   version: "1.0.0",
   requiredVersion: "0.0.1",
   description: "基于 ASSRT API 的字幕搜索",
-  author: "Forward",
+  author: "Yuan",
   site: "https://assrt.net",
   globalParams: [
     {
@@ -25,7 +25,14 @@ var WidgetMetadata = {
       title: "加载字幕",
       functionName: "loadSubtitle",
       type: "subtitle",
-      params: [],
+      params: [
+        {
+          name: "customKeyword",
+          title: "自定义搜索",
+          type: "input",
+          description: "留空则自动匹配，填写则使用自定义关键词",
+        },
+      ],
     },
   ],
 };
@@ -56,6 +63,12 @@ function getExt(filename) {
 }
 
 function buildSearchKeys(params) {
+  var customKeyword = getText(params.customKeyword);
+  
+  if (customKeyword) {
+    return [customKeyword];
+  }
+  
   var title = getText(params.title || params.seriesName);
   var season = params.season;
   var episode = params.episode;
