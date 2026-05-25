@@ -10,8 +10,6 @@
  * Token 获取地址：https://assrt.net/usercp.php
  */
 
-const API_BASE = "https://api.assrt.net/v1";
-
 WidgetMetadata = {
   id: "forward.assrt",
   title: "ASSRT 字幕",
@@ -117,6 +115,8 @@ WidgetMetadata = {
     ],
   },
 };
+
+const API_BASE = "https://api.assrt.net/v1";
 
 async function searchSubtitle(params = {}) {
   const token = params.token || Widget.storage.get("assrt_token");
