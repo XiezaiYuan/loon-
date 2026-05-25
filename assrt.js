@@ -1,357 +1,220 @@
 /**
- * ASSRT 字幕搜索下载模块
- * 
- * 功能：
- * 1. 根据关键词或视频文件名搜索字幕
- * 2. 查看字幕详情和下载链接
- * 3. 支持下载压缩包内的单个文件
- * 
- * 使用前需要在全局参数中配置 ASSRT API Token
- * Token 获取地址：https://assrt.net/usercp.php
+ * ASSRT 字幕搜索模块
+ * 支持在播放视频时自动搜索和加载字幕
  */
 
-WidgetMetadata = {
-  id: "forward.assrt",
+var WidgetMetadata = {
+  id: "forward.assrt.subtitle",
   title: "ASSRT 字幕",
   version: "1.0.0",
   requiredVersion: "0.0.1",
-  description: "从 ASSRT.net 搜索和下载字幕。支持智能文件名匹配，显示字幕详情，下载压缩包内的单个文件",
+  description: "基于 ASSRT API 的字幕搜索",
   author: "Forward",
   site: "https://assrt.net",
-  detailCacheDuration: 300,
-  
   globalParams: [
     {
       name: "token",
       title: "API Token",
       type: "input",
-      description: "在 assrt.net/usercp.php 获取你的 API Token",
-      value: "",
+      description: "在 assrt.net/usercp.php 获取",
     },
   ],
-  
   modules: [
     {
-      id: "searchSubtitle",
-      title: "搜索字幕",
-      description: "根据关键词搜索字幕",
-      functionName: "searchSubtitle",
-      cacheDuration: 600,
-      params: [
-        {
-          name: "keyword",
-          title: "搜索关键词",
-          type: "input",
-          description: "输入视频名称或关键词",
-          value: "",
-          placeholders: [
-            { title: "示例：Inception", value: "Inception" },
-            { title: "示例：Breaking Bad S01", value: "Breaking Bad S01" },
-          ],
-        },
-        {
-          name: "searchMode",
-          title: "搜索模式",
-          type: "enumeration",
-          description: "选择搜索模式",
-          value: "normal",
-          enumOptions: [
-            { title: "普通搜索", value: "normal", description: "使用关键词直接搜索" },
-            { title: "文件名匹配", value: "filename", description: "智能识别视频文件名" },
-            { title: "忽略压制组", value: "no_muxer", description: "忽略文件名中的压制组信息" },
-          ],
-        },
-        {
-          name: "page",
-          title: "页码",
-          type: "page",
-          value: 1,
-        },
-      ],
-    },
-    {
-      id: "getSubtitleDetail",
-      title: "字幕详情",
-      description: "获取字幕详细信息",
-      functionName: "getSubtitleDetail",
-      cacheDuration: 300,
-      params: [
-        {
-          name: "subtitleId",
-          title: "字幕ID",
-          type: "input",
-          description: "字幕的ID",
-          value: "",
-        },
-      ],
+      id: "loadSubtitle",
+      title: "加载字幕",
+      functionName: "loadSubtitle",
+      type: "subtitle",
+      params: [],
     },
   ],
-  
-  search: {
-    title: "搜索字幕",
-    functionName: "searchSubtitle",
-    params: [
-      {
-        name: "keyword",
-        title: "搜索关键词",
-        type: "input",
-        description: "输入视频名称或关键词",
-        placeholders: [
-          { title: "Inception", value: "Inception" },
-          { title: "Breaking Bad", value: "Breaking Bad" },
-        ],
-      },
-      {
-        name: "searchMode",
-        title: "搜索模式",
-        type: "enumeration",
-        value: "normal",
-        enumOptions: [
-          { title: "普通搜索", value: "normal" },
-          { title: "文件名匹配", value: "filename" },
-          { title: "忽略压制组", value: "no_muxer" },
-        ],
-      },
-    ],
-  },
 };
 
-const API_BASE = "https://api.assrt.net/v1";
+var API_BASE = "https://api.assrt.net/v1";
 
-async function searchSubtitle(params = {}) {
-  const token = params.token || Widget.storage.get("assrt_token");
+function getText(value) {
+  return String(value || "").trim();
+}
+
+function getLangTag(langDesc) {
+  if (!langDesc) return "【字幕】";
+  var t = String(langDesc).toLowerCase();
+  if (t.includes("简") || t.includes("chs")) return "【简中】";
+  if (t.includes("繁") || t.includes("cht")) return "【繁中】";
+  if (t.includes("双语") || t.includes("中英")) return "【双语】";
+  if (t.includes("英") || t.includes("eng")) return "【英文】";
+  return "【字幕】";
+}
+
+function getExt(filename) {
+  if (!filename) return ".srt";
+  var s = String(filename).toLowerCase();
+  if (s.endsWith(".srt")) return ".srt";
+  if (s.endsWith(".ass")) return ".ass";
+  if (s.endsWith(".ssa")) return ".ssa";
+  return ".srt";
+}
+
+function buildSearchKeys(params) {
+  var title = getText(params.title || params.seriesName);
+  var season = params.season;
+  var episode = params.episode;
   
-  if (!token) {
-    throw new Error("请先配置 ASSRT API Token");
+  if (!title) return [];
+  
+  var keys = [];
+  var hasSeason = !isNaN(season) && season > 0;
+  var hasEpisode = !isNaN(episode) && episode > 0;
+  
+  if (hasSeason && hasEpisode) {
+    var sStr = String(season).padStart(2, "0");
+    var eStr = String(episode).padStart(2, "0");
+    keys.push(title + " S" + sStr + "E" + eStr);
+    keys.push(title + " " + sStr + "x" + eStr);
+  } else if (hasEpisode) {
+    var eStr = String(episode).padStart(2, "0");
+    keys.push(title + " E" + eStr);
   }
   
-  const keyword = (params.keyword || "").trim();
-  if (!keyword) {
-    throw new Error("请输入搜索关键词");
+  if (hasSeason) {
+    var sStr = String(season).padStart(2, "0");
+    keys.push(title + " S" + sStr);
   }
   
-  if (keyword.length < 3) {
-    throw new Error("搜索关键词长度必须大于3个字符");
-  }
+  keys.push(title);
   
-  const page = params.page || 1;
-  const cnt = 15;
-  const pos = (page - 1) * cnt;
-  
-  const searchMode = params.searchMode || "normal";
+  return keys;
+}
+
+async function searchSub(token, keyword) {
+  var url = API_BASE + "/sub/search?token=" + encodeURIComponent(token) + "&q=" + encodeURIComponent(keyword) + "&cnt=10&is_file=1";
   
   try {
-    let url = `${API_BASE}/sub/search?token=${encodeURIComponent(token)}&q=${encodeURIComponent(keyword)}&cnt=${cnt}&pos=${pos}`;
-    
-    if (searchMode === "filename") {
-      url += "&is_file=1";
-    } else if (searchMode === "no_muxer") {
-      url += "&no_muxer=1";
-    }
-    
-    const response = await Widget.http.get(url, {
+    var response = await Widget.http.get(url, {
       headers: {
         "User-Agent": "ForwardWidgets/1.0.0",
-        "Accept": "application/json",
       },
     });
     
-    const data = response.data;
+    var data = response.data;
     
     if (data.status !== 0) {
-      throw new Error(_getErrorMessage(data.status));
-    }
-    
-    if (!data.sub || !data.sub.subs || data.sub.subs.length === 0) {
+      console.warn("[ASSRT] 搜索失败: " + data.status);
       return [];
     }
     
-    return data.sub.subs.map(sub => _formatSubtitleItem(sub));
+    if (!data.sub || !data.sub.subs) {
+      return [];
+    }
     
+    return data.sub.subs;
   } catch (error) {
-    console.error("[ASSRT] 搜索失败:", error.message || error);
-    throw error;
+    console.warn("[ASSRT] 搜索错误: " + error.message);
+    return [];
   }
 }
 
-async function getSubtitleDetail(params = {}) {
-  const token = params.token || Widget.storage.get("assrt_token");
-  
-  if (!token) {
-    throw new Error("请先配置 ASSRT API Token");
-  }
-  
-  const subtitleId = params.subtitleId;
-  if (!subtitleId) {
-    throw new Error("请提供字幕ID");
-  }
+async function getSubtitleDetail(token, subtitleId) {
+  var url = API_BASE + "/sub/detail?token=" + encodeURIComponent(token) + "&id=" + subtitleId;
   
   try {
-    const url = `${API_BASE}/sub/detail?token=${encodeURIComponent(token)}&id=${subtitleId}`;
-    
-    const response = await Widget.http.get(url, {
+    var response = await Widget.http.get(url, {
       headers: {
         "User-Agent": "ForwardWidgets/1.0.0",
-        "Accept": "application/json",
       },
     });
     
-    const data = response.data;
+    var data = response.data;
     
-    if (data.status !== 0) {
-      throw new Error(_getErrorMessage(data.status));
+    if (data.status !== 0 || !data.sub || !data.sub.subs || !data.sub.subs[0]) {
+      return null;
     }
     
-    if (!data.sub || !data.sub.subs || data.sub.subs.length === 0) {
-      throw new Error("未找到字幕详情");
-    }
-    
-    const sub = data.sub.subs[0];
-    
-    return {
-      id: sub.id.toString(),
-      type: "url",
-      title: sub.native_name || sub.title || sub.filename,
-      description: _buildDescription(sub),
-      videoUrl: sub.url,
-      childItems: sub.filelist ? sub.filelist.map(file => ({
-        id: `${sub.id}_${file.f}`,
-        type: "url",
-        title: file.f,
-        description: `文件大小: ${file.s}`,
-        videoUrl: file.url,
-      })) : null,
-    };
-    
+    return data.sub.subs[0];
   } catch (error) {
-    console.error("[ASSRT] 获取详情失败:", error.message || error);
-    throw error;
+    console.warn("[ASSRT] 获取详情错误: " + error.message);
+    return null;
   }
 }
 
-function _formatSubtitleItem(sub) {
-  const item = {
-    id: sub.id.toString(),
-    type: "url",
-    title: sub.native_name || sub.videoname || `字幕 ${sub.id}`,
-    description: _buildSubtitleDescription(sub),
-  };
+async function loadSubtitle(params) {
+  var token = params.token;
   
-  if (sub.videoname) {
-    item.description = `视频: ${sub.videoname}\n${item.description}`;
+  if (!token) {
+    console.warn("[ASSRT] 未配置 Token");
+    return [];
   }
   
-  return item;
-}
-
-function _buildSubtitleDescription(sub) {
-  const parts = [];
+  var searchKeys = buildSearchKeys(params);
   
-  if (sub.lang && sub.lang.desc) {
-    parts.push(`语言: ${sub.lang.desc}`);
+  if (searchKeys.length === 0) {
+    return [];
   }
   
-  if (sub.subtype) {
-    parts.push(`格式: ${sub.subtype}`);
-  }
+  var allSubs = [];
   
-  if (sub.release_site) {
-    parts.push(`来源: ${sub.release_site}`);
-  }
-  
-  if (sub.upload_time) {
-    parts.push(`上传: ${sub.upload_time}`);
-  }
-  
-  if (sub.vote_score && sub.vote_score > 0) {
-    parts.push(`评分: ${sub.vote_score}`);
-  }
-  
-  return parts.join(" | ");
-}
-
-function _buildDescription(sub) {
-  const parts = [];
-  
-  if (sub.filename) {
-    parts.push(`文件名: ${sub.filename}`);
-  }
-  
-  if (sub.size) {
-    parts.push(`大小: ${_formatFileSize(sub.size)}`);
-  }
-  
-  if (sub.lang && sub.lang.desc) {
-    parts.push(`语言: ${sub.lang.desc}`);
-  }
-  
-  if (sub.subtype) {
-    parts.push(`格式: ${sub.subtype}`);
-  }
-  
-  if (sub.release_site) {
-    parts.push(`来源: ${sub.release_site}`);
-  }
-  
-  if (sub.upload_time) {
-    parts.push(`上传时间: ${sub.upload_time}`);
-  }
-  
-  if (sub.vote_score !== undefined) {
-    parts.push(`评分: ${sub.vote_score}`);
-  }
-  
-  if (sub.view_count) {
-    parts.push(`浏览: ${sub.view_count}`);
-  }
-  
-  if (sub.down_count) {
-    parts.push(`下载: ${sub.down_count}`);
-  }
-  
-  if (sub.producer) {
-    const producerInfo = [];
-    if (sub.producer.uploader) {
-      producerInfo.push(`上传者: ${sub.producer.uploader}`);
-    }
-    if (sub.producer.producer) {
-      producerInfo.push(`制作: ${sub.producer.producer}`);
-    }
-    if (sub.producer.source) {
-      producerInfo.push(`来源: ${sub.producer.source}`);
-    }
-    if (producerInfo.length > 0) {
-      parts.push(producerInfo.join(" | "));
+  for (var i = 0; i < searchKeys.length; i++) {
+    var keyword = searchKeys[i];
+    var list = await searchSub(token, keyword);
+    
+    if (list.length > 0) {
+      allSubs = list;
+      break;
     }
   }
   
-  return parts.join("\n");
-}
-
-function _formatFileSize(bytes) {
-  if (bytes < 1024) {
-    return `${bytes}B`;
-  } else if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(2)}KB`;
-  } else {
-    return `${(bytes / (1024 * 1024)).toFixed(2)}MB`;
+  if (allSubs.length === 0) {
+    return [];
   }
-}
-
-function _getErrorMessage(status) {
-  const errorMessages = {
-    1: "用户不存在",
-    101: "搜索关键词长度必须大于3个字符",
-    20000: "请求缺少参数",
-    20001: "Token 无效",
-    20400: "API 端点不存在",
-    20900: "字幕不存在",
-    30000: "服务器错误",
-    30001: "数据库不可用",
-    30002: "搜索引擎不可用",
-    30300: "API 暂时不可用",
-    30900: "请求频率超限（每分钟最多20次）",
-  };
   
-  return errorMessages[status] || `未知错误 (状态码: ${status})`;
+  var result = [];
+  var existKey = new Set();
+  var maxResultCount = 10;
+  
+  for (var i = 0; i < allSubs.length && result.length < maxResultCount; i++) {
+    var sub = allSubs[i];
+    var subtitleId = String(sub.id);
+    
+    var dedupeKey = subtitleId;
+    if (existKey.has(dedupeKey)) continue;
+    existKey.add(dedupeKey);
+    
+    var detail = await getSubtitleDetail(token, subtitleId);
+    
+    if (!detail || !detail.url) continue;
+    
+    var langDesc = detail.lang && detail.lang.desc ? detail.lang.desc : "";
+    var langTag = getLangTag(langDesc);
+    var filename = detail.filename || sub.native_name || "字幕";
+    var ext = getExt(filename);
+    
+    var subtitleUrl = detail.url;
+    var title = langTag + filename.replace(/\.(srt|ass|ssa|zip|rar|7z)$/i, "") + ext;
+    
+    result.push({
+      id: subtitleId,
+      title: title,
+      lang: langDesc || "未知",
+      count: sub.vote_score || 0,
+      url: subtitleUrl,
+    });
+    
+    if (detail.filelist && detail.filelist.length > 0) {
+      for (var j = 0; j < detail.filelist.length && result.length < maxResultCount; j++) {
+        var file = detail.filelist[j];
+        var fileExt = getExt(file.f);
+        var fileTitle = langTag + file.f.replace(/\.(srt|ass|ssa)$/i, "") + fileExt;
+        
+        result.push({
+          id: subtitleId + "_" + j,
+          title: fileTitle,
+          lang: langDesc || "未知",
+          count: 0,
+          url: file.url,
+        });
+      }
+    }
+  }
+  
+  return result;
 }
