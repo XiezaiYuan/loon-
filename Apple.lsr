@@ -1,3 +1,6 @@
+DOMAIN-SUFFIX,weather-data.apple.com
+DOMAIN-SUFFIX,weather-data-origin.apple.com
+DOMAIN-SUFFIX,api.weather.com
 DOMAIN,apple-events.akamaized.net
 DOMAIN,appleworldwidedeveloper.hb-api.omtrdc.net
 DOMAIN,appleworldwidedeveloper.sc.omtrdc.net
